@@ -26,6 +26,9 @@ xgboost==3.1.0
 lightgbm==4.6.0
 catboost==1.2.8
 
+# Explicabilidad de modelos
+shap==0.51.0
+
 # Notebook
 jupyterlab==4.6.4
 ipykernel==6.30.1

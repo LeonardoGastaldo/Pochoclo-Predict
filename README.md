@@ -47,22 +47,22 @@ de candidatas al azar y descartar despues las que no sirven.
 
 ## Tecnicas utilizadas
 
-| Etapa | Tecnica |
-|---|---|
-| Extraccion | Muestreo aleatorio estratificado por anio sobre la API REST de TMDB, con filtro de calidad aplicado en linea y reintentos/backoff ante errores |
-| EDA | Analisis univariado/bivariado, deteccion de asimetria, correlacion |
+| Etapa               | Tecnica                                                                                                                                                                                                                                                                                                   |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Extraccion          | Muestreo aleatorio estratificado por anio sobre la API REST de TMDB, con filtro de calidad aplicado en linea y reintentos/backoff ante errores                                                                                                                                                            |
+| EDA                 | Analisis univariado/bivariado, deteccion de asimetria, correlacion                                                                                                                                                                                                                                        |
 | Feature Engineering | TF-IDF + SVD (elenco y keywords), analisis de sentimiento (VADER) sobre la sinopsis, codificacion one-hot del genero principal, codificacion **multi-label** de subgeneros, y **features historicas calculadas de forma temporal/expansiva** (sin data leakage) para director, elenco, saga y productoras |
-| Modelado | Comparacion de modelos de **boosting** (Gradient Boosting, HistGradientBoosting, XGBoost, LightGBM, CatBoost) contra un baseline, con busqueda de hiperparametros (`RandomizedSearchCV`) y seleccion por MAE en un test set held-out |
+| Modelado            | Comparacion de modelos de **boosting** (Gradient Boosting, HistGradientBoosting, XGBoost, LightGBM, CatBoost) contra un baseline, con busqueda de hiperparametros (`RandomizedSearchCV`) y seleccion por MAE en un test set held-out                                                                      |
 
-### Variables excluidas por fuga de informacion (*data leakage*)
+### Variables excluidas por fuga de informacion (_data leakage_)
 
 `recaudacion`, `popularidad` y `cantidad_votos` **no se usan como feature
-directa de la propia pelicula**: se conocen recien *despues* del estreno, al
+directa de la propia pelicula**: se conocen recien _despues_ del estreno, al
 mismo tiempo que `nota_promedio` (`cantidad_votos` es literalmente la
 cantidad de votos con la que se calculo esa nota), asi que usarlas
 directamente seria entrenar con informacion no disponible en el momento real
 de prediccion. En cambio, se usan como insumo para construir **features
-historicas** -desempeño de peliculas *anteriores* del mismo director, elenco,
+historicas** -desempeño de peliculas _anteriores_ del mismo director, elenco,
 saga o productora-, calculadas siempre con un corte temporal (solo peliculas
 estrenadas antes que la que se esta prediciendo), para que esa informacion
 historica sea legitima y no filtre el resultado de la propia pelicula ni de
@@ -127,7 +127,7 @@ pip install -r requirements.txt
 ### 2. Configurar la API Key de TMDB
 
 1. Crear una cuenta gratuita en https://www.themoviedb.org/ y generar una
-   API Key en *Configuracion > API*.
+   API Key en _Configuracion > API_.
 2. Copiar `.env.example` a un nuevo archivo `.env` (misma carpeta) y
    completar `TMDB_API_KEY` con la key propia.
 
@@ -149,5 +149,8 @@ correrlos en otro orden.
 
 ## Autor
 
+Sol Gabriele Peruilh - Leonardo Gabriel Gastaldo -
+Ezequiel Baglieri- Maximiliano Vergara Dominguez
+
 Trabajo Practico Final de la materia Web Mining, Magister en Ciencia de
-Datos.
+Datos de la Universidad Austral.

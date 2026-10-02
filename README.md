@@ -6,9 +6,10 @@ Trabajo Practico Final - **Web Mining** (Magister en Ciencia de Datos)
 
 Predecir la **nota promedio** (`nota_promedio`, escala 1-10) que los usuarios
 de [The Movie Database (TMDB)](https://www.themoviedb.org/) le asignan a una
-pelicula, a partir de datos obtenidos directamente de la API publica de TMDB:
-metadata de produccion (presupuesto, recaudacion, duracion, fecha de
-estreno), genero(s), elenco, palabras clave y sinopsis.
+pelicula, a partir de datos conocidos al momento del estreno (o antes):
+presupuesto, duracion, fecha de estreno, genero(s), elenco, palabras clave,
+sinopsis, y el desempeño **historico** (previo) del director, el elenco, la
+saga/coleccion y las productoras involucradas.
 
 Es un problema de **regresion supervisada**: la variable objetivo es
 continua (no una clase), y se evalua con metricas de error de regresion
@@ -19,14 +20,54 @@ continua (no una clase), y se evalua con metricas de error de regresion
 [TMDB API v3](https://developer.themoviedb.org/reference/intro/getting-started).
 Se requiere una API Key gratuita (ver seccion "Configuracion" mas abajo).
 
+### Alcance y condiciones del dataset
+
+- Solo peliculas estrenadas **a partir de 1980**, en estado `Released`.
+- Solo peliculas con **director identificado** y con **presupuesto cargado**
+  en TMDB (son variables centrales para el modelado; TMDB no tiene cargado
+  el presupuesto en aproximadamente dos tercios de su catalogo).
+- Piso minimo de votos (`vote_count >= 30`) para que `nota_promedio` sea
+  estadisticamente confiable.
+
+### Muestreo: aleatorio, estratificado por anio, filtrado en linea
+
+Ordenar `/discover/movie` por cantidad de votos y recorrer paginas en
+secuencia (primer enfoque probado) da siempre el mismo techo: las peliculas
+mas votadas de toda la historia, sistematicamente mejor calificadas (sesgo
+de seleccion). Para evitarlo, `TMDBClient.sample_movies` (en
+`src/tmdb_client.py`) arma la muestra anio por anio: dentro de cada anio
+recorre las paginas de resultados **en orden aleatorio** (y los resultados
+dentro de cada pagina tambien en orden aleatorio), pidiendo el detalle de
+cada candidata hasta **alcanzar la cantidad objetivo de peliculas que
+cumplen las condiciones de arriba** (o agotar el universo disponible de ese
+anio, lo que ocurra primero). El filtro de director/presupuesto se aplica
+**durante** la busqueda (no en un paso posterior) para maximizar cuantas
+peliculas validas se obtienen de cada anio, en lugar de pedir un lote fijo
+de candidatas al azar y descartar despues las que no sirven.
+
 ## Tecnicas utilizadas
 
 | Etapa | Tecnica |
 |---|---|
-| Extraccion | Consumo de API REST paginada, con reintentos y backoff ante errores/rate-limit |
-| EDA | Analisis univariado/bivariado, deteccion de asimetria y de "ceros faltantes", correlacion |
-| Feature Engineering | TF-IDF + SVD (elenco y keywords), analisis de sentimiento (VADER) sobre la sinopsis, codificacion one-hot del genero principal, codificacion **multi-label** de subgeneros, encoding de experiencia del director |
+| Extraccion | Muestreo aleatorio estratificado por anio sobre la API REST de TMDB, con filtro de calidad aplicado en linea y reintentos/backoff ante errores |
+| EDA | Analisis univariado/bivariado, deteccion de asimetria, correlacion |
+| Feature Engineering | TF-IDF + SVD (elenco y keywords), analisis de sentimiento (VADER) sobre la sinopsis, codificacion one-hot del genero principal, codificacion **multi-label** de subgeneros, y **features historicas calculadas de forma temporal/expansiva** (sin data leakage) para director, elenco, saga y productoras |
 | Modelado | Comparacion de modelos de **boosting** (Gradient Boosting, HistGradientBoosting, XGBoost, LightGBM, CatBoost) contra un baseline, con busqueda de hiperparametros (`RandomizedSearchCV`) y seleccion por MAE en un test set held-out |
+
+### Variables excluidas por fuga de informacion (*data leakage*)
+
+`recaudacion`, `popularidad` y `cantidad_votos` **no se usan como feature
+directa de la propia pelicula**: se conocen recien *despues* del estreno, al
+mismo tiempo que `nota_promedio` (`cantidad_votos` es literalmente la
+cantidad de votos con la que se calculo esa nota), asi que usarlas
+directamente seria entrenar con informacion no disponible en el momento real
+de prediccion. En cambio, se usan como insumo para construir **features
+historicas** -desempeño de peliculas *anteriores* del mismo director, elenco,
+saga o productora-, calculadas siempre con un corte temporal (solo peliculas
+estrenadas antes que la que se esta prediciendo), para que esa informacion
+historica sea legitima y no filtre el resultado de la propia pelicula ni de
+peliculas futuras. El detalle esta documentado en
+`03_feature_engineering.ipynb`.
 
 ## Estructura del proyecto
 
@@ -52,10 +93,11 @@ Pochoclo Predict/
 │   ├── raw/peliculas_raw.csv           <- salida de 01 (se regenera al ejecutar el notebook)
 │   └── processed/                      <- salidas de 02 y 03
 │
-├── models/best_model.pkl               <- mejor modelo entrenado (salida de 04)
-│
-└── legacy/prototipo_original.py        <- script exploratorio inicial (prediccion de recaudacion), reemplazado por los notebooks
+└── models/best_model.pkl               <- mejor modelo entrenado (salida de 04)
 ```
+
+> Nota: la carpeta local `legacy/` (prototipos exploratorios previos a este
+> pipeline) no forma parte del repositorio (ver `.gitignore`).
 
 ## Como reproducir el proyecto
 
@@ -104,33 +146,6 @@ correrlos en otro orden.
 > incluye el uso de `truststore` para validar los certificados contra el
 > almacen de confianza del sistema operativo en lugar del bundle de
 > `certifi`, evitando errores de `SSLCertVerificationError`.
-
-## Resultados
-
-Dataset final: **2.998 peliculas** (2.398 de entrenamiento / 600 de test),
-**100 features**, tras filtrar por `cantidad_votos >= 30` y descartar
-peliculas sin sinopsis.
-
-Comparacion de modelos (metricas sobre el test set, 600 peliculas nunca
-vistas durante la busqueda de hiperparametros):
-
-| Modelo | MAE | RMSE | R² | MAPE |
-|---|---|---|---|---|
-| **CatBoost** (ganador) | **0.311** | **0.407** | **0.666** | **4.64%** |
-| XGBoost | 0.313 | 0.408 | 0.664 | 4.66% |
-| HistGradientBoosting | 0.318 | 0.409 | 0.661 | 4.72% |
-| LightGBM | 0.318 | 0.410 | 0.661 | 4.74% |
-| Gradient Boosting | 0.329 | 0.425 | 0.635 | 4.90% |
-| Baseline (media) | 0.575 | 0.705 | -0.003 | 8.43% |
-
-**CatBoost** resulto el mejor modelo: en promedio se equivoca por apenas
-**0.31 puntos** sobre una escala de 1 a 10 (MAPE ≈ 4.6%), y explica cerca
-del **67% de la varianza** de `nota_promedio`. Los cinco modelos de boosting
-superan holgadamente al baseline (que solo predice la nota media), lo que
-confirma que las features de elenco, keywords, sentimiento y metadata de
-produccion construidas en el NB03 tienen poder predictivo real. El detalle
-de importancia de features (por permutacion) esta en la seccion 6 de
-`04_modelos_predictivos.ipynb`.
 
 ## Autor
 

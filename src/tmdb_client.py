@@ -17,6 +17,7 @@ certificados del sistema operativo (Windows/mac/Linux), que si conoce esa CA.
 """
 
 import json
+import random
 import time
 from pathlib import Path
 from typing import Optional
@@ -73,40 +74,6 @@ class TMDBClient:
         return resp.json()
 
     # ------------------------------------------------------------------
-    # Descubrimiento de peliculas
-    # ------------------------------------------------------------------
-    def discover_movie_ids(
-        self,
-        min_vote_count: int = 100,
-        max_pages: int = 100,
-        sort_by: str = "vote_count.desc",
-    ) -> list[int]:
-        """
-        Recorre /discover/movie ordenando por cantidad de votos descendente,
-        de forma de priorizar peliculas con una calificacion (nota_promedio)
-        estadisticamente mas confiable (evita el ruido de titulos con 1 o 2
-        votos y notas de 1 o 10).
-        """
-        ids = []
-        for page in range(1, max_pages + 1):
-            data = self._get(
-                "/discover/movie",
-                params={
-                    "sort_by": sort_by,
-                    "vote_count.gte": min_vote_count,
-                    "include_adult": "false",
-                    "page": page,
-                },
-            )
-            results = data.get("results", [])
-            if not results:
-                break
-            ids.extend(m["id"] for m in results)
-            if page >= data.get("total_pages", page):
-                break
-        return ids
-
-    # ------------------------------------------------------------------
     # Detalle completo de una pelicula
     # ------------------------------------------------------------------
     def get_movie_full(self, movie_id: int) -> Optional[dict]:
@@ -117,6 +84,111 @@ class TMDBClient:
             )
         except requests.exceptions.RequestException:
             return None
+
+    # ------------------------------------------------------------------
+    # Muestreo aleatorio estratificado por anio, con filtro aplicado EN LINEA
+    # ------------------------------------------------------------------
+    def sample_movies(
+        self,
+        year_from: int,
+        year_to: int,
+        min_vote_count: int = 30,
+        target_per_year: int = 100,
+        require_director: bool = True,
+        require_budget: bool = True,
+        seed: int = 42,
+        on_year_done=None,
+    ) -> list[dict]:
+        """
+        Arma una muestra ALEATORIA de peliculas ya parseadas que cumplen las
+        condiciones de calidad pedidas (director identificado, presupuesto
+        cargado), tomando del universo real de peliculas elegibles la mayor
+        cantidad posible por anio (hasta `target_per_year`).
+
+        Esto es deliberadamente distinto a "pedir un lote fijo de ids al azar
+        y descartar despues los que no cumplen": la API de TMDB no permite
+        filtrar por "tiene presupuesto cargado" en `/discover/movie` (ese
+        dato solo se conoce al pedir el detalle de cada pelicula), por lo que
+        es inevitable pedir el detalle de algunas candidatas que terminan
+        descartandose. Lo que si se puede controlar es NO frenar la busqueda
+        hasta alcanzar la cantidad objetivo de peliculas que **si cumplen**
+        (o hasta agotar el universo disponible de ese anio, lo que ocurra
+        primero), en lugar de tomar un lote chico al azar y aceptar lo que
+        sea que sobreviva al filtro.
+
+        Para evitar el sesgo hacia las peliculas mas votadas/mas famosas
+        (ver `discover_movie_ids_stratified` en versiones anteriores), por
+        cada anio del rango [year_from, year_to] se recorren las paginas de
+        `/discover/movie` en **orden aleatorio**, y dentro de cada pagina los
+        resultados tambien se visitan en **orden aleatorio**.
+
+        `on_year_done(anio, aceptadas, universo_visto)` es un callback
+        opcional para reportar progreso (ej. imprimir desde el notebook).
+        """
+        rng = random.Random(seed)
+        aceptadas: list[dict] = []
+
+        for anio in range(year_from, year_to + 1):
+            primera = self._get(
+                "/discover/movie",
+                params={
+                    "primary_release_year": anio,
+                    "vote_count.gte": min_vote_count,
+                    "include_adult": "false",
+                    "sort_by": "vote_count.desc",
+                    "page": 1,
+                },
+            )
+            total_pages = min(primera.get("total_pages", 0), 500)  # tope duro de la API
+            if total_pages == 0:
+                if on_year_done:
+                    on_year_done(anio, 0, 0)
+                continue
+
+            paginas = list(range(1, total_pages + 1))
+            rng.shuffle(paginas)
+
+            aceptadas_anio: list[dict] = []
+            ids_vistos: set[int] = set()
+
+            for pagina in paginas:
+                if len(aceptadas_anio) >= target_per_year:
+                    break
+                data = primera if pagina == 1 else self._get(
+                    "/discover/movie",
+                    params={
+                        "primary_release_year": anio,
+                        "vote_count.gte": min_vote_count,
+                        "include_adult": "false",
+                        "sort_by": "vote_count.desc",
+                        "page": pagina,
+                    },
+                )
+                resultados = list(data.get("results", []))
+                rng.shuffle(resultados)
+
+                for m in resultados:
+                    if len(aceptadas_anio) >= target_per_year:
+                        break
+                    if m["id"] in ids_vistos:
+                        continue
+                    ids_vistos.add(m["id"])
+
+                    raw = self.get_movie_full(m["id"])
+                    fila = TMDBClient.parse_movie(raw)
+                    if fila is None:
+                        continue
+                    if require_director and not fila["director"]:
+                        continue
+                    if require_budget and not fila["presupuesto"]:
+                        continue
+                    aceptadas_anio.append(fila)
+
+            aceptadas.extend(aceptadas_anio)
+            if on_year_done:
+                on_year_done(anio, len(aceptadas_anio), len(ids_vistos))
+
+        return aceptadas
 
     @staticmethod
     def _english_overview(raw: dict) -> str:
@@ -148,6 +220,8 @@ class TMDBClient:
         companias = [c["name"] for c in raw.get("production_companies", []) or []]
         paises = [c["name"] for c in raw.get("production_countries", []) or []]
 
+        coleccion = raw.get("belongs_to_collection") or None
+
         return {
             "id": raw.get("id"),
             "titulo": raw.get("title"),
@@ -172,6 +246,8 @@ class TMDBClient:
             "reparto_principal": json.dumps(reparto_principal, ensure_ascii=False),
             "director": directores[0] if directores else None,
             "keywords": json.dumps(keywords, ensure_ascii=False),
+            "coleccion_id": coleccion["id"] if coleccion else None,
+            "coleccion_nombre": coleccion["name"] if coleccion else None,
             "nota_promedio": raw.get("vote_average"),
             "cantidad_votos": raw.get("vote_count", 0),
         }

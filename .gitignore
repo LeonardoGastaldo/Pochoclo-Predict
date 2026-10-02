@@ -22,3 +22,10 @@ catboost_info/
 # Entornos
 .venv/
 env/
+
+# Scripts auxiliares para generar los notebooks (no se usan en tiempo de
+# ejecucion, solo durante el desarrollo; el codigo real vive en los .ipynb)
+_build/
+
+# Prototipos personales previos al proyecto (no son parte del pipeline, no se suben)
+legacy/

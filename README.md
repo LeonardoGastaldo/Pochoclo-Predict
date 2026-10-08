@@ -47,12 +47,14 @@ de candidatas al azar y descartar despues las que no sirven.
 
 ## Tecnicas utilizadas
 
-| Etapa               | Tecnica                                                                                                                                                                                                                                                                                                   |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Extraccion          | Muestreo aleatorio estratificado por anio sobre la API REST de TMDB, con filtro de calidad aplicado en linea y reintentos/backoff ante errores                                                                                                                                                            |
-| EDA                 | Analisis univariado/bivariado, deteccion de asimetria, correlacion                                                                                                                                                                                                                                        |
-| Feature Engineering | TF-IDF + SVD (elenco y keywords), analisis de sentimiento (VADER) sobre la sinopsis, codificacion one-hot del genero principal, codificacion **multi-label** de subgeneros, y **features historicas calculadas de forma temporal/expansiva** (sin data leakage) para director, elenco, saga y productoras |
-| Modelado            | Comparacion de modelos de **boosting** (Gradient Boosting, HistGradientBoosting, XGBoost, LightGBM, CatBoost) contra un baseline, con busqueda de hiperparametros (`RandomizedSearchCV`) y seleccion por MAE en un test set held-out                                                                      |
+| Etapa | Tecnica |
+| --- | --- |
+| Extraccion | Muestreo aleatorio estratificado por anio sobre la API REST de TMDB, con filtro de calidad aplicado en linea, checkpoint incremental y reintentos/backoff ante errores. Enriquecimiento posterior con el poster de cada pelicula y sus identificadores externos (`imdb_id`, `wikidata_id`), que dejan preparado un futuro cruce con otras fuentes (IMDb, Wikidata) por id exacto |
+| EDA | Analisis univariado/bivariado, deteccion de asimetria, correlacion |
+| Feature Engineering | TF-IDF + SVD (elenco y keywords), analisis de sentimiento (VADER) sobre la sinopsis, codificacion one-hot del genero principal, codificacion **multi-label** de subgeneros, y **features historicas calculadas de forma temporal/expansiva** (sin data leakage) para director, elenco, saga y productoras. Cierra con un heatmap de correlacion de Pearson y un PCA exploratorio |
+| Modelado | Comparacion de modelos de **boosting** (Gradient Boosting, HistGradientBoosting, XGBoost, LightGBM, CatBoost) y lineales regularizados (Ridge, ElasticNet) contra un baseline, con busqueda de hiperparametros (`RandomizedSearchCV`), seleccion por MAE en un test set held-out, e interpretabilidad con importancia por permutacion y **SHAP** |
+| Evaluacion PCA | Reentrenamiento de los mismos modelos sobre 80 componentes principales vs. las features originales, con **test de Wilcoxon** apareado para evaluar si la diferencia es significativa |
+| Dashboard | Panel interactivo (`ipywidgets`) que elige peliculas al azar del test set y muestra poster, datos, director y reparto principal, junto con la nota predicha por el modelo ganador vs. la real. Incluye un medidor tipo reloj cuyas zonas se calibran con los percentiles del error del modelo en test (buena <= P30, regular P30-P70, mala > P70) y un grafico predicho vs. real acumulado de la sesion |
 
 ### Variables excluidas por fuga de informacion (_data leakage_)
 
@@ -80,10 +82,12 @@ Pochoclo Predict/
 ├── .gitignore
 │
 ├── notebooks/
-│   ├── 01_extraccion_datos.ipynb       <- descarga el dataset crudo desde la API de TMDB
+│   ├── 01_extraccion_datos.ipynb       <- descarga el dataset crudo desde la API de TMDB (+ posters e ids externos)
 │   ├── 02_eda.ipynb                    <- analisis exploratorio + limpieza
-│   ├── 03_feature_engineering.ipynb    <- TF-IDF, sentimiento, encoding de generos
-│   └── 04_modelos_predictivos.ipynb    <- entrenamiento, comparacion y seleccion del modelo
+│   ├── 03_feature_engineering.ipynb    <- TF-IDF, sentimiento, generos, features historicas, correlacion y PCA
+│   ├── 04_modelos_predictivos.ipynb    <- entrenamiento, comparacion, SHAP y seleccion del modelo
+│   ├── 05_pca_vs_original.ipynb        <- PCA vs. features originales + test de Wilcoxon
+│   └── 06_dashboard.ipynb              <- dashboard interactivo con el modelo ganador
 │
 ├── src/
 │   ├── paths.py                        <- rutas del proyecto (portables, sin hardcodear)
@@ -139,7 +143,17 @@ jupyter lab
 
 Y correr, en orden, `01` → `02` → `03` → `04`. Cada notebook lee la salida
 del anterior desde `data/`, por lo que no se pueden saltear pasos ni
-correrlos en otro orden.
+correrlos en otro orden. Despues, `05` (evaluacion PCA) y `06` (dashboard)
+se pueden correr en cualquier orden: ambos solo leen lo ya generado por los
+notebooks anteriores.
+
+> `01` tarda del orden de una hora (una llamada a la API por cada pelicula
+> candidata). Si se interrumpe, al volver a ejecutarlo retoma desde donde
+> quedo gracias a los archivos de checkpoint `data/raw/_*_parcial.csv`.
+
+> El dashboard (`06`) necesita un kernel activo para que funcione el boton
+> (JupyterLab o notebooks de VS Code), y conexion a internet para mostrar
+> los posters, que se cargan desde el CDN publico de TMDB.
 
 > Nota sobre redes corporativas: si la red tiene un proxy que inspecciona el
 > trafico HTTPS (comun en entornos corporativos), `src/tmdb_client.py` ya

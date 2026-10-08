@@ -1,34 +1,36 @@
 # Pochoclo Predict - dependencias del proyecto
 # Instalar con:  pip install -r requirements.txt
 # (se recomienda un entorno conda/venv dedicado, ej: conda create -n webmining python=3.11)
+# Versiones verificadas contra el entorno con el que se ejecutaron todos los notebooks.
 
 # Acceso a datos / entorno
 requests==2.34.2
-python-dotenv==1.1.1
-truststore==0.10.1      # usa el almacen de certificados del SO (evita errores SSL en redes corporativas)
-tqdm==4.67.1
+python-dotenv==1.2.3
+truststore==0.10.4      # usa el almacen de certificados del SO (evita errores SSL en redes corporativas)
 
 # Analisis y manipulacion de datos
 pandas==3.0.6
 numpy==2.4.6
+scipy==1.17.1           # test de Wilcoxon (NB05)
 
 # Visualizacion
 matplotlib==3.11.2
 seaborn==0.13.2
-wordcloud==1.9.4
 
 # NLP / Feature Engineering
 nltk==3.10.3
 scikit-learn==1.9.1
 
-# Modelos de Boosting
-xgboost==3.1.0
-lightgbm==4.6.0
-catboost==1.2.8
+# Modelos
+xgboost==3.2.0
+lightgbm==4.7.0
+catboost==1.2.10
+joblib==1.6.0           # guardado/carga del modelo ganador (NB04, NB06)
 
 # Explicabilidad de modelos
 shap==0.51.0
 
-# Notebook
+# Notebook y dashboard
 jupyterlab==4.6.4
-ipykernel==6.30.1
+ipykernel==7.3.0
+ipywidgets==8.1.9

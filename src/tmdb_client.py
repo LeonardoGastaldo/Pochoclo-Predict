@@ -36,6 +36,7 @@ from src import paths
 load_dotenv(paths.ENV_FILE)
 
 BASE_URL = "https://api.themoviedb.org/3"
+IMAGE_BASE_URL = "https://image.tmdb.org/t/p"
 
 
 class TMDBClient:
@@ -80,10 +81,34 @@ class TMDBClient:
         try:
             return self._get(
                 f"/movie/{movie_id}",
-                params={"append_to_response": "credits,keywords,translations"},
+                params={"append_to_response": "credits,keywords,translations,external_ids"},
             )
         except requests.exceptions.RequestException:
             return None
+
+    def get_poster_paths(self, movie_id: int) -> dict:
+        """Version liviana de `get_movie_full`, sin `append_to_response`, para
+        cuando solo hace falta poster/backdrop de una pelicula cuyo resto de
+        datos ya se tiene (ej. enriquecer un dataset ya extraido)."""
+        try:
+            data = self._get(f"/movie/{movie_id}")
+        except requests.exceptions.RequestException:
+            return {"poster_path": None, "backdrop_path": None}
+        return {"poster_path": data.get("poster_path"), "backdrop_path": data.get("backdrop_path")}
+
+    def get_external_ids(self, movie_id: int) -> dict:
+        """Usa el endpoint dedicado `/movie/{id}/external_ids` (mas liviano que
+        pedir el detalle completo) para obtener identificadores externos de
+        una pelicula cuyo resto de datos ya se tiene. TMDB devuelve ademas del
+        `imdb_id` el `wikidata_id` (el QID de Wikidata) directamente, sin
+        necesidad de matchear por titulo: ambos sirven como llave para cruzar
+        en el futuro con otras fuentes (datasets oficiales de IMDb, consultas
+        SPARQL a Wikidata para premios -propiedad P166-, etc.)."""
+        try:
+            data = self._get(f"/movie/{movie_id}/external_ids")
+        except requests.exceptions.RequestException:
+            return {"imdb_id": None, "wikidata_id": None}
+        return {"imdb_id": data.get("imdb_id"), "wikidata_id": data.get("wikidata_id")}
 
     # ------------------------------------------------------------------
     # Muestreo aleatorio estratificado por anio, con filtro aplicado EN LINEA
@@ -248,6 +273,21 @@ class TMDBClient:
             "keywords": json.dumps(keywords, ensure_ascii=False),
             "coleccion_id": coleccion["id"] if coleccion else None,
             "coleccion_nombre": coleccion["name"] if coleccion else None,
+            "poster_path": raw.get("poster_path"),
+            "backdrop_path": raw.get("backdrop_path"),
+            "imdb_id": raw.get("imdb_id"),
+            "wikidata_id": raw.get("external_ids", {}).get("wikidata_id") if raw.get("external_ids") else None,
             "nota_promedio": raw.get("vote_average"),
             "cantidad_votos": raw.get("vote_count", 0),
         }
+
+    @staticmethod
+    def poster_url(poster_path: Optional[str], size: str = "w342") -> Optional[str]:
+        """Arma la URL publica de la imagen a partir del `poster_path` (o
+        `backdrop_path`) devuelto por la API. TMDB sirve estas imagenes desde
+        un CDN publico: no hace falta descargarlas/guardarlas en el proyecto,
+        alcanza con guardar el path y construir la URL al momento de mostrarla.
+        Tamaños tipicos de poster: w92, w154, w185, w342, w500, original."""
+        if not poster_path:
+            return None
+        return f"{IMAGE_BASE_URL}/{size}{poster_path}"

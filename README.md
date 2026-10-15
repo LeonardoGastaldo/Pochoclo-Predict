@@ -8,8 +8,8 @@ Predecir la **nota promedio** (`nota_promedio`, escala 1-10) que los usuarios
 de [The Movie Database (TMDB)](https://www.themoviedb.org/) le asignan a una
 pelicula, a partir de datos conocidos al momento del estreno (o antes):
 presupuesto, duracion, fecha de estreno, genero(s), elenco, palabras clave,
-sinopsis, y el desempeño **historico** (previo) del director, el elenco, la
-saga/coleccion y las productoras involucradas.
+sinopsis, idioma y pais de produccion, y el desempeño **historico** (previo)
+del director, el elenco, la saga/coleccion y las productoras involucradas.
 
 Es un problema de **regresion supervisada**: la variable objetivo es
 continua (no una clase), y se evalua con metricas de error de regresion
@@ -49,11 +49,11 @@ de candidatas al azar y descartar despues las que no sirven.
 
 | Etapa | Tecnica |
 | --- | --- |
-| Extraccion | Muestreo aleatorio estratificado por anio sobre la API REST de TMDB, con filtro de calidad aplicado en linea, checkpoint incremental y reintentos/backoff ante errores. Enriquecimiento posterior con el poster de cada pelicula y sus identificadores externos (`imdb_id`, `wikidata_id`), que dejan preparado un futuro cruce con otras fuentes (IMDb, Wikidata) por id exacto |
+| Extraccion | Muestreo aleatorio estratificado por anio sobre la API REST de TMDB, con filtro de calidad aplicado en linea, checkpoint incremental y reintentos/backoff ante errores. Enriquecimiento posterior con el poster de cada pelicula y sus identificadores externos (`imdb_id`, `wikidata_id`), que dejan preparado un futuro cruce con otras fuentes (IMDb, Wikidata) por id exacto. Descarga ademas la **filmografia completa** del director y de los 3 actores principales de cada pelicula (no solo las peliculas de la muestra), consultando la API en paralelo |
 | EDA | Analisis univariado/bivariado, deteccion de asimetria, correlacion |
-| Feature Engineering | TF-IDF + SVD (elenco y keywords), analisis de sentimiento (VADER) sobre la sinopsis, codificacion one-hot del genero principal, codificacion **multi-label** de subgeneros, y **features historicas calculadas de forma temporal/expansiva** (sin data leakage) para director, elenco, saga y productoras. Cierra con un heatmap de correlacion de Pearson y un PCA exploratorio |
-| Modelado | Comparacion de modelos de **boosting** (Gradient Boosting, HistGradientBoosting, XGBoost, LightGBM, CatBoost) y lineales regularizados (Ridge, ElasticNet) contra un baseline, con busqueda de hiperparametros (`RandomizedSearchCV`), seleccion por MAE en un test set held-out, e interpretabilidad con importancia por permutacion y **SHAP** |
-| Evaluacion PCA | Reentrenamiento de los mismos modelos sobre 80 componentes principales vs. las features originales, con **test de Wilcoxon** apareado para evaluar si la diferencia es significativa |
+| Feature Engineering | TF-IDF + SVD (elenco y keywords), analisis de sentimiento (VADER) sobre la sinopsis, codificacion one-hot del genero principal, codificacion **multi-label** de subgeneros, **features historicas calculadas de forma temporal/expansiva** (sin data leakage) para director, elenco, saga y productoras (incluida la nota promedio de las peliculas *anteriores* del director y del elenco segun su filmografia completa), e idioma original y paises de produccion. Cierra con un heatmap de correlacion de Pearson y un PCA exploratorio |
+| Modelado | Comparacion de modelos de **boosting** (Gradient Boosting, HistGradientBoosting, XGBoost, LightGBM, CatBoost) y lineales regularizados (Ridge, ElasticNet) contra un baseline, con busqueda de hiperparametros (`RandomizedSearchCV`) y **ensambles** de los modelos ajustados (promedio con `VotingRegressor` y apilado con `StackingRegressor`). Seleccion por MAE en un test set held-out: un ensamble solo se elige si mejora de forma significativa (test de Wilcoxon por pelicula) al mejor modelo individual. Interpretabilidad con importancia por permutacion y **SHAP** |
+| Evaluacion PCA | Reentrenamiento de los mismos modelos sobre las componentes principales que explican el 90% de la varianza vs. las features originales, con **test de Wilcoxon** apareado para evaluar si la diferencia es significativa |
 | Dashboard | Panel interactivo (`ipywidgets`) que elige peliculas al azar del test set y muestra poster, datos, director y reparto principal, junto con la nota predicha por el modelo ganador vs. la real. Incluye un medidor tipo reloj cuyas zonas se calibran con los percentiles del error del modelo en test (buena <= P30, regular P30-P70, mala > P70) y un grafico predicho vs. real acumulado de la sesion |
 
 ### Variables excluidas por fuga de informacion (_data leakage_)
@@ -85,7 +85,7 @@ Pochoclo Predict/
 │   ├── 01_extraccion_datos.ipynb       <- descarga el dataset crudo desde la API de TMDB (+ posters e ids externos)
 │   ├── 02_eda.ipynb                    <- analisis exploratorio + limpieza
 │   ├── 03_feature_engineering.ipynb    <- TF-IDF, sentimiento, generos, features historicas, correlacion y PCA
-│   ├── 04_modelos_predictivos.ipynb    <- entrenamiento, comparacion, SHAP y seleccion del modelo
+│   ├── 04_modelos_predictivos.ipynb    <- entrenamiento, ensambles, comparacion, SHAP y seleccion del modelo
 │   ├── 05_pca_vs_original.ipynb        <- PCA vs. features originales + test de Wilcoxon
 │   └── 06_dashboard.ipynb              <- dashboard interactivo con el modelo ganador
 │
@@ -95,6 +95,7 @@ Pochoclo Predict/
 │
 ├── data/
 │   ├── raw/peliculas_raw.csv           <- salida de 01 (se regenera al ejecutar el notebook)
+│   ├── raw/filmografias.csv            <- filmografia completa de directores y actores principales (salida de 01)
 │   └── processed/                      <- salidas de 02 y 03
 │
 └── models/best_model.pkl               <- mejor modelo entrenado (salida de 04)

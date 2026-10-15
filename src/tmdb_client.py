@@ -110,6 +110,48 @@ class TMDBClient:
             return {"imdb_id": None, "wikidata_id": None}
         return {"imdb_id": data.get("imdb_id"), "wikidata_id": data.get("wikidata_id")}
 
+    @staticmethod
+    def _ids_director_y_reparto(credits: dict) -> dict:
+        # Mismo criterio que parse_movie: primer "Director" del crew y los 3
+        # primeros del cast segun el orden de aparicion en los creditos.
+        crew = credits.get("crew", []) or []
+        director_id = next((c["id"] for c in crew if c.get("job") == "Director"), None)
+        cast = sorted(credits.get("cast", []) or [], key=lambda c: c.get("order", 999))
+        return {"director_id": director_id, "reparto_ids": json.dumps([c["id"] for c in cast[:3]])}
+
+    def get_credit_ids(self, movie_id: int) -> dict:
+        """Ids de TMDB del director y de los 3 actores principales de una
+        pelicula, para despues poder pedir la filmografia completa de cada uno."""
+        try:
+            credits = self._get(f"/movie/{movie_id}/credits")
+        except requests.exceptions.RequestException:
+            return {"director_id": None, "reparto_ids": json.dumps([])}
+        return TMDBClient._ids_director_y_reparto(credits)
+
+    def get_person_filmography(self, person_id: int) -> dict:
+        """Filmografia completa de una persona en TMDB (no solo las peliculas de
+        nuestra muestra), separada en peliculas que dirigio y en las que actuo.
+        Cada pelicula se guarda como [id, fecha_estreno, nota_promedio,
+        cantidad_votos]; se descartan las que no tienen fecha o votos."""
+        try:
+            data = self._get(f"/person/{person_id}/movie_credits")
+        except requests.exceptions.RequestException:
+            return {"person_id": person_id, "como_director": "[]", "como_actor": "[]"}
+
+        def compactar(entradas):
+            return json.dumps([
+                [e["id"], e["release_date"], e.get("vote_average", 0), e.get("vote_count", 0)]
+                for e in entradas
+                if e.get("release_date") and e.get("vote_count", 0) > 0
+            ])
+
+        dirigidas = [e for e in data.get("crew", []) or [] if e.get("job") == "Director"]
+        return {
+            "person_id": person_id,
+            "como_director": compactar(dirigidas),
+            "como_actor": compactar(data.get("cast", []) or []),
+        }
+
     # ------------------------------------------------------------------
     # Muestreo aleatorio estratificado por anio, con filtro aplicado EN LINEA
     # ------------------------------------------------------------------
@@ -277,6 +319,7 @@ class TMDBClient:
             "backdrop_path": raw.get("backdrop_path"),
             "imdb_id": raw.get("imdb_id"),
             "wikidata_id": raw.get("external_ids", {}).get("wikidata_id") if raw.get("external_ids") else None,
+            **TMDBClient._ids_director_y_reparto(raw.get("credits", {}) or {}),
             "nota_promedio": raw.get("vote_average"),
             "cantidad_votos": raw.get("vote_count", 0),
         }

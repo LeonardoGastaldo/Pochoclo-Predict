@@ -19,5 +19,6 @@ MODELS_DIR = PROJECT_ROOT / "models"
 ENV_FILE = PROJECT_ROOT / ".env"
 
 RAW_MOVIES_CSV = DATA_RAW / "peliculas_raw.csv"
+FILMOGRAFIAS_CSV = DATA_RAW / "filmografias.csv"
 FEATURES_CSV = DATA_PROCESSED / "dataset_features.csv"
 EDA_CLEAN_CSV = DATA_PROCESSED / "peliculas_clean.csv"

@@ -32,3 +32,6 @@ legacy/
 
 # Copia de resguardo previa a sumar filmografias (local, no se sube)
 _backup_antes_filmografias/
+
+# Presentacion del TP y ejemplos de otros anios (material local, no se sube)
+Presentacion/
